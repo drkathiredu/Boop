@@ -125,22 +125,27 @@ export default function App() {
         const topics: {title: string, startPage: number, endPage: number}[] = [];
         
         const traverse = async (items: any[]) => {
-          const promises = items.map(async (item) => {
+          for (const item of items) {
             let dest = item.dest;
             if (typeof dest === 'string') {
               dest = await doc.getDestination(dest);
             }
             if (dest) {
               try {
-                const pageIndex = await doc.getPageIndex(dest[0]);
-                topics.push({ title: item.title, startPage: pageIndex + 1, endPage: 0 });
-              } catch (err) {}
+                // PDF.js getPageIndex can take a Ref object {num, gen} which is usually dest[0]
+                const ref = typeof dest[0] === 'object' ? dest[0] : dest;
+                const pageIndex = await doc.getPageIndex(ref);
+                if (pageIndex !== null && pageIndex !== undefined) {
+                   topics.push({ title: item.title, startPage: pageIndex + 1, endPage: 0 });
+                }
+              } catch (err) {
+                 console.error("Failed to get page index", err);
+              }
             }
             if (item.items && item.items.length > 0) {
               await traverse(item.items);
             }
-          });
-          await Promise.all(promises);
+          }
         };
         
         await traverse(outline);
@@ -229,7 +234,7 @@ export default function App() {
       const data = await res.json();
       
       if (data.error) {
-        alert("Error: " + data.error);
+        alert("Error: " + data.error + (data.details ? " | " + data.details : ""));
       } else {
         setExtractedTopic({ 
           query: `Pages ${start}-${end}`, 
