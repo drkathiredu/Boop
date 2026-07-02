@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, Send, BookOpen, MessageSquare, Loader2, Bot, Info, Settings2, Search, RefreshCw, Library } from 'lucide-react';
+import { Upload, FileText, Send, BookOpen, MessageSquare, Loader2, Bot, Info, Settings2, RefreshCw, Library, PanelRightClose, PanelRightOpen, Download } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Message, Model } from './types';
 
@@ -7,8 +7,9 @@ export default function App() {
   const [books, setBooks] = useState<string[]>([]);
   const [selectedBook, setSelectedBook] = useState<string | null>(null);
   
-  const [topicQuery, setTopicQuery] = useState('');
-  const [extractedTopic, setExtractedTopic] = useState<{ query: string; content: string } | null>(null);
+  const [startPage, setStartPage] = useState('');
+  const [endPage, setEndPage] = useState('');
+  const [extractedTopic, setExtractedTopic] = useState<{ query: string; content: string; pdfBase64: string } | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -21,6 +22,7 @@ export default function App() {
   const [models, setModels] = useState<Model[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -93,27 +95,29 @@ export default function App() {
     setSelectedBook(book);
     setExtractedTopic(null);
     setMessages([]);
-    setTopicQuery('');
+    setStartPage('');
+    setEndPage('');
     if (window.innerWidth < 768) {
       setIsSidebarOpen(false);
     }
   };
 
-  const handleExtractTopic = async (e: React.FormEvent) => {
+  const handleExtractPages = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedBook || !topicQuery.trim()) return;
+    if (!selectedBook || !startPage || !endPage) return;
 
     setIsExtracting(true);
     setExtractedTopic(null);
     setMessages([]);
 
     try {
-      const res = await fetch('/api/extract-topic', {
+      const res = await fetch('/api/extract-pages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           filename: selectedBook,
-          topic: topicQuery.trim()
+          startPage: startPage,
+          endPage: endPage
         })
       });
       const data = await res.json();
@@ -121,12 +125,16 @@ export default function App() {
       if (data.error) {
         alert("Error: " + data.error);
       } else {
-        setExtractedTopic({ query: topicQuery.trim(), content: data.topicContent });
-        setMessages([{ role: 'assistant', content: `I've extracted relevant sections about **"${topicQuery.trim()}"** from ${selectedBook}. What would you like to know?` }]);
+        setExtractedTopic({ 
+          query: `Pages ${startPage}-${endPage}`, 
+          content: data.text,
+          pdfBase64: data.pdfBase64 
+        });
+        setMessages([{ role: 'assistant', content: `I've read pages ${startPage} to ${endPage} from ${selectedBook}. Ask me anything about this section!` }]);
       }
     } catch (error) {
       console.error("Extraction error:", error);
-      alert("Failed to extract topic.");
+      alert("Failed to extract pages.");
     } finally {
       setIsExtracting(false);
     }
@@ -170,12 +178,22 @@ export default function App() {
     }
   };
 
+  const handleDownloadExtract = () => {
+    if (!extractedTopic || !extractedTopic.pdfBase64) return;
+    const link = document.createElement('a');
+    link.href = `data:application/pdf;base64,${extractedTopic.pdfBase64}`;
+    link.download = `${selectedBook}-extracted-${startPage}-${endPage}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="flex h-screen w-full bg-[#FAFAFA] font-sans overflow-hidden text-gray-900">
       
       {/* Sidebar: Library & Upload */}
       <div className={`
-        fixed inset-y-0 left-0 z-20 w-72 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out
+        fixed inset-y-0 left-0 z-30 w-72 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out
         md:relative md:translate-x-0 flex flex-col shadow-sm
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
@@ -240,119 +258,157 @@ export default function App() {
 
       {isSidebarOpen && (
         <div 
-          className="fixed inset-0 bg-black/20 z-10 md:hidden"
+          className="fixed inset-0 bg-black/20 z-20 md:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
 
-      {/* Main Content: Split View */}
-      <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden bg-white">
-        
-        {/* Document Viewer / Topic Search Pane */}
-        <div className="flex-1 border-r border-gray-200 flex flex-col min-w-[300px] bg-white h-1/2 md:h-full relative shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-10">
-          <div className="h-auto min-h-[56px] border-b border-gray-100 flex flex-col justify-center px-4 md:px-6 bg-white/80 backdrop-blur shrink-0 sticky top-0 z-10 py-3 gap-3">
-            <div className="flex items-center gap-3">
-              <button 
-                className="md:hidden p-2 -ml-2 text-gray-500 hover:text-gray-900 rounded-lg hover:bg-gray-100"
-                onClick={() => setIsSidebarOpen(true)}
-              >
-                <Library className="w-5 h-5" />
-              </button>
-              <h2 className="font-medium text-gray-900 flex items-center gap-2 truncate">
-                <BookOpen className="w-4 h-4 text-blue-500 shrink-0" />
-                <span className="truncate">{selectedBook || 'Select a Book'}</span>
-              </h2>
-            </div>
-            
-            {selectedBook && (
-              <form onSubmit={handleExtractTopic} className="relative flex items-center w-full max-w-lg">
-                <Search className="w-4 h-4 text-gray-400 absolute left-3" />
-                <input
-                  type="text"
-                  placeholder="Enter a topic to extract and learn about..."
-                  value={topicQuery}
-                  onChange={(e) => setTopicQuery(e.target.value)}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl py-2 pl-10 pr-24 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                />
-                <button
-                  type="submit"
-                  disabled={!topicQuery.trim() || isExtracting}
-                  className="absolute right-1.5 py-1.5 px-3 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center gap-1"
-                >
-                  {isExtracting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                  Extract
-                </button>
-              </form>
-            )}
+      {/* Main Content: PDF Viewer */}
+      <div className="flex-1 flex flex-col min-w-0 bg-gray-100 relative">
+        <div className="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-white shrink-0 shadow-sm z-10 relative">
+          <div className="flex items-center gap-3">
+            <button 
+              className="md:hidden p-2 -ml-2 text-gray-500 hover:text-gray-900 rounded-lg hover:bg-gray-100 transition-colors"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <Library className="w-5 h-5" />
+            </button>
+            <h2 className="font-medium text-gray-900 flex items-center gap-2 truncate max-w-[200px] sm:max-w-md">
+              <BookOpen className="w-4 h-4 text-blue-500 shrink-0" />
+              <span className="truncate">{selectedBook || 'Reader'}</span>
+            </h2>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-6 md:p-10 bg-[#FCFCFC]">
-            {extractedTopic ? (
-              <div className="max-w-3xl mx-auto">
-                <div className="mb-6 pb-4 border-b border-gray-200">
-                  <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Extracted Context</h3>
-                  <h1 className="text-2xl font-bold text-gray-900">Topic: {extractedTopic.query}</h1>
-                </div>
-                <p className="text-gray-800 leading-relaxed font-serif text-lg md:text-xl whitespace-pre-wrap">
-                  {extractedTopic.content}
-                </p>
-              </div>
-            ) : isExtracting ? (
-              <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-4">
-                <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-                <p className="text-sm text-gray-500">Searching and extracting relevant sections...</p>
-              </div>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-4 max-w-sm mx-auto text-center">
-                <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center border border-blue-100/50 mb-2">
-                  <Search className="w-8 h-8 text-blue-400" />
-                </div>
-                {selectedBook ? (
-                  <>
-                    <h3 className="text-gray-800 font-medium">Search for a topic</h3>
-                    <p className="text-sm text-gray-500">Enter a specific topic you want to learn about from this book. We'll extract the relevant sections so you can ask the AI questions.</p>
-                  </>
-                ) : (
-                  <>
-                    <h3 className="text-gray-800 font-medium">Select or upload a book</h3>
-                    <p className="text-sm text-gray-500">Choose a book from the library on the left, or upload a new one via the web or SSH to begin.</p>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+          {selectedBook && (
+            <button
+              onClick={() => setIsAiSidebarOpen(!isAiSidebarOpen)}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                isAiSidebarOpen 
+                  ? 'bg-blue-50 text-blue-700' 
+                  : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <Bot className={`w-4 h-4 ${isAiSidebarOpen ? 'text-blue-600' : 'text-emerald-500'}`} />
+              <span className="hidden sm:inline">Ask AI & Extract</span>
+              {isAiSidebarOpen ? <PanelRightClose className="w-4 h-4 ml-1 opacity-50" /> : <PanelRightOpen className="w-4 h-4 ml-1 opacity-50" />}
+            </button>
+          )}
         </div>
+        
+        <div className="flex-1 overflow-hidden relative bg-gray-200/50">
+          {selectedBook ? (
+            <iframe 
+              src={`/api/books/${selectedBook}`} 
+              className="w-full h-full border-none"
+              title="PDF Viewer"
+            />
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-4">
+              <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center border border-gray-200 shadow-sm">
+                <FileText className="w-10 h-10 text-gray-300" />
+              </div>
+              <h3 className="text-gray-800 font-medium text-lg">No book selected</h3>
+              <p className="text-sm text-gray-500 max-w-sm text-center">
+                Select a book from the library on the left, or upload a new PDF to start reading. The native browser viewer will show the index/outline automatically.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
 
-        {/* AI Chat Pane */}
-        <div className="w-full md:w-[420px] lg:w-[480px] bg-gray-50/50 flex flex-col h-1/2 md:h-full shrink-0">
-          <div className="h-14 border-b border-gray-200/60 flex items-center px-4 justify-between bg-white shrink-0">
+      {/* AI Extract & Chat Sidebar */}
+      {isAiSidebarOpen && (
+        <div className="w-full md:w-[420px] lg:w-[480px] bg-white border-l border-gray-200 flex flex-col h-full shrink-0 shadow-[-4px_0_24px_rgba(0,0,0,0.02)] absolute right-0 top-0 md:relative z-20">
+          <div className="h-14 border-b border-gray-100 flex items-center px-4 justify-between bg-white shrink-0">
             <h2 className="font-medium text-gray-800 flex items-center gap-2">
-              <Bot className="w-4 h-4 text-emerald-500" />
-              NIM Tutor
+              <Bot className="w-5 h-5 text-emerald-500" />
+              AI Assistant
             </h2>
             <div className="flex items-center gap-2">
-              <Settings2 className="w-4 h-4 text-gray-400" />
-              <select
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="bg-transparent text-sm text-gray-600 outline-none cursor-pointer focus:ring-0 max-w-[140px] truncate"
+              <button 
+                className="md:hidden p-2 text-gray-400 hover:text-gray-800"
+                onClick={() => setIsAiSidebarOpen(false)}
               >
-                {models.map(m => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
+                <PanelRightClose className="w-5 h-5" />
+              </button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center px-4 text-gray-400 gap-3">
-                <MessageSquare className="w-10 h-10 text-gray-300 mb-2" />
-                <p className="text-sm">Extract a topic to start chatting with the AI.</p>
-                <div className="bg-blue-50 text-blue-700 text-xs p-3 rounded-lg flex gap-2 text-left w-full mt-4 items-start border border-blue-100/50">
-                  <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                  <p>Remember to set your NVIDIA_API_KEY in the environment variables.</p>
+          <div className="p-5 border-b border-gray-100 bg-gray-50/50 shrink-0">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Extract Topic by Pages</h3>
+            <form onSubmit={handleExtractPages} className="space-y-3">
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-xs text-gray-500 mb-1 block">Start Page</label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 15"
+                    value={startPage}
+                    onChange={(e) => setStartPage(e.target.value)}
+                    className="w-full bg-white border border-gray-200 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                  />
                 </div>
+                <div className="flex-1">
+                  <label className="text-xs text-gray-500 mb-1 block">End Page</label>
+                  <input
+                    type="number"
+                    min={startPage || "1"}
+                    placeholder="e.g. 20"
+                    value={endPage}
+                    onChange={(e) => setEndPage(e.target.value)}
+                    className="w-full bg-white border border-gray-200 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={!startPage || !endPage || isExtracting}
+                className="w-full py-2 px-4 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 shadow-sm"
+              >
+                {isExtracting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                Extract Pages for Chat
+              </button>
+            </form>
+            
+            {extractedTopic && (
+              <div className="mt-4 p-3 bg-emerald-50 border border-emerald-100 rounded-lg flex items-center justify-between">
+                <div className="text-xs text-emerald-800">
+                  <span className="font-semibold block mb-0.5">Extraction Ready</span>
+                  Pages {startPage} - {endPage} loaded for AI.
+                </div>
+                <button
+                  onClick={handleDownloadExtract}
+                  className="p-2 bg-white text-emerald-600 rounded-md shadow-sm border border-emerald-100 hover:bg-emerald-50 transition-colors"
+                  title="Download Extracted PDF"
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Chat</div>
+              <div className="flex items-center gap-1.5 text-xs">
+                <Settings2 className="w-3.5 h-3.5 text-gray-400" />
+                <select
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="bg-transparent text-gray-500 outline-none cursor-pointer focus:ring-0 max-w-[120px] truncate"
+                >
+                  {models.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-center px-4 text-gray-400 gap-3">
+                <MessageSquare className="w-8 h-8 text-gray-300 mb-1" />
+                <p className="text-sm">Extract pages above to start chatting with the AI about them.</p>
               </div>
             ) : (
               messages.map((msg, idx) => (
@@ -361,14 +417,14 @@ export default function App() {
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div 
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
+                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-[14px] leading-relaxed ${
                       msg.role === 'user' 
                         ? 'bg-gray-900 text-white rounded-br-sm shadow-sm' 
-                        : 'bg-white text-gray-800 border border-gray-200/60 rounded-bl-sm shadow-sm'
+                        : 'bg-gray-50 text-gray-800 border border-gray-200/60 rounded-bl-sm shadow-sm'
                     }`}
                   >
                     {msg.role === 'assistant' ? (
-                      <div className="markdown-body prose prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-gray-50 prose-pre:border prose-pre:border-gray-200">
+                      <div className="markdown-body prose prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-white prose-pre:border prose-pre:border-gray-200">
                         <Markdown>{msg.content}</Markdown>
                       </div>
                     ) : (
@@ -380,7 +436,7 @@ export default function App() {
             )}
             {isChatting && (
               <div className="flex justify-start">
-                <div className="bg-white border border-gray-200/60 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-2 shadow-sm">
+                <div className="bg-gray-50 border border-gray-200/60 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-2 shadow-sm">
                   <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                   <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                   <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
@@ -390,7 +446,7 @@ export default function App() {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="p-4 bg-white border-t border-gray-100 shrink-0">
+          <div className="p-4 bg-white border-t border-gray-100 shrink-0 shadow-[0_-4px_24px_rgba(0,0,0,0.02)]">
             <form onSubmit={handleSendMessage} className="relative flex items-end">
               <textarea
                 value={inputMessage}
@@ -401,9 +457,9 @@ export default function App() {
                     handleSendMessage(e);
                   }
                 }}
-                placeholder={extractedTopic ? `Ask about "${extractedTopic.query}"...` : "Extract a topic first"}
+                placeholder={extractedTopic ? `Ask about pages ${startPage}-${endPage}...` : "Extract pages first"}
                 disabled={!extractedTopic || isChatting}
-                className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 pl-4 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none max-h-32 disabled:opacity-50 disabled:bg-gray-50"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 pl-4 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none max-h-32 disabled:opacity-50 disabled:bg-gray-50"
                 rows={1}
                 style={{
                   minHeight: '46px',
@@ -413,15 +469,15 @@ export default function App() {
               <button
                 type="submit"
                 disabled={!inputMessage.trim() || !extractedTopic || isChatting}
-                className="absolute right-2 bottom-1.5 p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors"
+                className="absolute right-2 bottom-1.5 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors"
               >
                 <Send className="w-4 h-4 ml-0.5" />
               </button>
             </form>
           </div>
         </div>
+      )}
 
-      </div>
     </div>
   );
 }

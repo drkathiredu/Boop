@@ -5,6 +5,7 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { createRequire } from "module";
+import { PDFDocument } from "pdf-lib";
 
 // @ts-ignore
 const _require = typeof require !== "undefined" ? require : createRequire(import.meta.url);
@@ -68,6 +69,19 @@ async function startServer() {
     }
   });
 
+  app.get("/api/books/:filename", (req, res) => {
+    try {
+      const filePath = path.join(booksDir, req.params.filename);
+      if (fs.existsSync(filePath)) {
+        res.sendFile(filePath);
+      } else {
+        res.status(404).send("File not found");
+      }
+    } catch (e: any) {
+      res.status(500).send("Error");
+    }
+  });
+
   app.post("/api/upload", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
@@ -80,48 +94,47 @@ async function startServer() {
     }
   });
 
-  app.post("/api/extract-topic", async (req, res) => {
+  app.post("/api/extract-pages", async (req, res) => {
     try {
-      const { filename, topic } = req.body;
-      if (!filename || !topic) {
-        return res.status(400).json({ error: "Missing filename or topic" });
+      const { filename, startPage, endPage } = req.body;
+      if (!filename || startPage == null || endPage == null) {
+        return res.status(400).json({ error: "Missing filename, startPage, or endPage" });
       }
 
-      const fullText = await getBookText(filename);
+      const filePath = path.join(booksDir, filename);
+      if (!fs.existsSync(filePath)) throw new Error("Book not found");
+      const buffer = fs.readFileSync(filePath);
       
-      const paragraphs = fullText.split(/\n\s*\n/);
-      const keywords = topic.toLowerCase().split(' ').filter((k: string) => k.length > 2);
-      if (keywords.length === 0) keywords.push(topic.toLowerCase());
+      const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+      const newPdf = await PDFDocument.create();
+      
+      const start = parseInt(startPage);
+      const end = parseInt(endPage);
 
-      const scoredParagraphs = paragraphs.map((p: string, index: number) => {
-        const lowerP = p.toLowerCase();
-        let score = 0;
-        keywords.forEach((k: string) => {
-          if (lowerP.includes(k)) score++;
-        });
-        return { p, index, score };
-      });
-
-      scoredParagraphs.sort((a: any, b: any) => b.score - a.score);
-      
-      // Top 20 relevant paragraphs
-      const topMatches = scoredParagraphs.filter((sp: any) => sp.score > 0).slice(0, 20);
-      
-      if (topMatches.length === 0) {
-        return res.json({ topicContent: "No relevant sections found for this topic in the book. Try different keywords." });
+      const pageIndices = [];
+      for (let i = start - 1; i <= end - 1; i++) {
+        if (i >= 0 && i < pdfDoc.getPageCount()) {
+           pageIndices.push(i);
+        }
       }
 
-      topMatches.sort((a: any, b: any) => a.index - b.index);
+      if (pageIndices.length === 0) {
+        return res.status(400).json({ error: "Invalid page range" });
+      }
 
-      let topicContent = "";
-      topMatches.forEach((match: any) => {
-        topicContent += `[...] ${match.p.trim()} [...]\n\n`;
-      });
+      const copiedPages = await newPdf.copyPages(pdfDoc, pageIndices);
+      copiedPages.forEach((page) => newPdf.addPage(page));
 
-      res.json({ topicContent });
+      const newPdfBytes = await newPdf.save();
+      const newPdfBuffer = Buffer.from(newPdfBytes);
+      
+      const data = await pdfParse(newPdfBuffer);
+      const base64Pdf = newPdfBuffer.toString('base64');
+      
+      res.json({ text: data.text, pdfBase64: base64Pdf });
     } catch (error: any) {
       console.error("Extraction error:", error);
-      res.status(500).json({ error: "Failed to extract topic", details: error.message });
+      res.status(500).json({ error: "Failed to extract pages", details: error.message });
     }
   });
 
