@@ -6,8 +6,9 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { createRequire } from "module";
 
-const require = createRequire(import.meta.url);
-const pdfParse = require("pdf-parse");
+// @ts-ignore
+const _require = typeof require !== "undefined" ? require : createRequire(import.meta.url);
+const pdfParse = _require("pdf-parse");
 
 // Setup books directory for SSH uploads and web uploads
 const booksDir = '/home/books';
