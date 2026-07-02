@@ -111,6 +111,76 @@ export default function App() {
 
   const [isGeneratingIndex, setIsGeneratingIndex] = useState(false);
   const [indexTopics, setIndexTopics] = useState<{title: string, startPage: number, endPage: number}[]>([]);
+  const [hasNativeIndex, setHasNativeIndex] = useState(false);
+  const [isParsingIndex, setIsParsingIndex] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const handleDocumentLoad = async (e: any) => {
+    const doc = e.doc;
+    setIsParsingIndex(true);
+    setIndexTopics([]);
+    try {
+      const outline = await doc.getOutline();
+      if (outline && outline.length > 0) {
+        const topics: {title: string, startPage: number, endPage: number}[] = [];
+        
+        const traverse = async (items: any[]) => {
+          const promises = items.map(async (item) => {
+            let dest = item.dest;
+            if (typeof dest === 'string') {
+              dest = await doc.getDestination(dest);
+            }
+            if (dest) {
+              try {
+                const pageIndex = await doc.getPageIndex(dest[0]);
+                topics.push({ title: item.title, startPage: pageIndex + 1, endPage: 0 });
+              } catch (err) {}
+            }
+            if (item.items && item.items.length > 0) {
+              await traverse(item.items);
+            }
+          });
+          await Promise.all(promises);
+        };
+        
+        await traverse(outline);
+        
+        if (topics.length > 0) {
+          topics.sort((a, b) => a.startPage - b.startPage);
+          
+          for (let i = 0; i < topics.length; i++) {
+            if (i < topics.length - 1) {
+                let nextStart = topics[i+1].startPage;
+                topics[i].endPage = nextStart > topics[i].startPage ? nextStart - 1 : topics[i].startPage;
+            } else {
+                topics[i].endPage = doc.numPages;
+            }
+          }
+          
+          const uniqueTopics = topics.filter((t, index, self) => 
+            index === self.findIndex((t2) => (
+              t.startPage === t2.startPage && t.title === t2.title
+            ))
+          );
+          
+          setIndexTopics(uniqueTopics);
+          setHasNativeIndex(true);
+        } else {
+          setHasNativeIndex(false);
+        }
+      } else {
+        setHasNativeIndex(false);
+      }
+    } catch (err) {
+      console.error("Error parsing outline", err);
+    } finally {
+      setIsParsingIndex(false);
+    }
+  };
+
+  const handlePageChange = (e: any) => {
+    setCurrentPage(e.currentPage + 1);
+  };
 
   const handleGenerateIndex = async () => {
     if (!selectedBook) return;
@@ -352,6 +422,8 @@ export default function App() {
                 <Viewer
                   fileUrl={`/api/books/${selectedBook}`}
                   plugins={[defaultLayoutPluginInstance]}
+                  onDocumentLoad={handleDocumentLoad}
+                  onPageChange={handlePageChange}
                 />
               </Worker>
             </div>
@@ -388,11 +460,21 @@ export default function App() {
           </div>
 
           <div className="p-5 border-b border-gray-100 bg-gray-50/50 shrink-0">
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Extract Topic by Pages</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-700">Extract Topic by Pages</h3>
+              {currentPage > 0 && (
+                <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-medium">
+                  Current: p. {currentPage}
+                </span>
+              )}
+            </div>
             <form onSubmit={handleExtractPages} className="space-y-3">
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="text-xs text-gray-500 mb-1 block">Start Page</label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs text-gray-500 block">Start Page</label>
+                    <button type="button" onClick={() => setStartPage(currentPage.toString())} className="text-[10px] text-blue-600 hover:underline">Use Current</button>
+                  </div>
                   <input
                     type="number"
                     min="1"
@@ -403,7 +485,10 @@ export default function App() {
                   />
                 </div>
                 <div className="flex-1">
-                  <label className="text-xs text-gray-500 mb-1 block">End Page</label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs text-gray-500 block">End Page</label>
+                    <button type="button" onClick={() => setEndPage(currentPage.toString())} className="text-[10px] text-blue-600 hover:underline">Use Current</button>
+                  </div>
                   <input
                     type="number"
                     min={startPage || "1"}
@@ -441,14 +526,21 @@ export default function App() {
             )}
             
             <div className="mt-4 pt-4 border-t border-gray-200">
-              <button
-                onClick={handleGenerateIndex}
-                disabled={isGeneratingIndex}
-                className="w-full py-2 px-4 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 mb-2"
-              >
-                {isGeneratingIndex ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-                Generate AI Index for entire book
-              </button>
+              {isParsingIndex ? (
+                 <div className="w-full py-2 flex items-center justify-center gap-2 text-xs text-gray-500">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Parsing PDF outline...
+                 </div>
+              ) : !hasNativeIndex ? (
+                <button
+                  onClick={handleGenerateIndex}
+                  disabled={isGeneratingIndex}
+                  className="w-full py-2 px-4 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 mb-2"
+                >
+                  {isGeneratingIndex ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
+                  Generate AI Index for entire book
+                </button>
+              ) : null}
               
               {indexTopics.length > 0 && (
                 <div className="mt-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
