@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  nim-reader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nim-pdf-reader
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount the host machine's /home/books directory to the container's /home/books
+      # This allows you to upload PDFs via SSH directly to /home/books on your VPS
+      - /home/books:/home/books
+    environment:
+      - NODE_ENV=production
+      # Pass the API key from your host environment or .env file
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+    restart: unless-stopped
