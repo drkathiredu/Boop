@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const pdfParse = require("pdf-parse");
 
 // Setup books directory for SSH uploads and web uploads
-const booksDir = path.join(process.cwd(), 'books');
+const booksDir = '/home/books';
 if (!fs.existsSync(booksDir)) {
   fs.mkdirSync(booksDir, { recursive: true });
 }

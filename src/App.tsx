@@ -207,7 +207,7 @@ export default function App() {
             {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
             {isUploading ? 'Uploading...' : 'Upload PDF'}
           </button>
-          <p className="text-xs text-gray-400 text-center mt-3 font-medium">Or upload via SSH to ./books</p>
+          <p className="text-xs text-gray-400 text-center mt-3 font-medium">Or upload via SSH to /home/books</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-3">
