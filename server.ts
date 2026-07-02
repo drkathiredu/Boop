@@ -48,6 +48,27 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
 
   app.get("/api/models", async (req, res) => {
+    try {
+      const apiKey = process.env.NVIDIA_API_KEY;
+      if (apiKey) {
+        const response = await fetch("https://integrate.api.nvidia.com/v1/models", {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          let models = data.data.map((m: any) => {
+             const parts = m.id.split('/');
+             const name = parts.length > 1 ? parts[1].split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : m.id;
+             return { id: m.id, name: name + ` (${parts[0] || m.owned_by})` };
+          });
+          models.sort((a: any, b: any) => a.name.localeCompare(b.name));
+          return res.json({ models });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch models dynamically:", e);
+    }
+
     res.json({
       models: [
         { id: "meta/llama-3.1-70b-instruct", name: "Llama 3.1 70B Instruct" },
