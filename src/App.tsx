@@ -2,8 +2,14 @@ import { useState, useRef, useEffect } from 'react';
 import { Upload, FileText, Send, BookOpen, MessageSquare, Loader2, Bot, Info, Settings2, RefreshCw, Library, PanelRightClose, PanelRightOpen, Download } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Message, Model } from './types';
+import { Viewer, Worker } from '@react-pdf-viewer/core';
+import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
+import '@react-pdf-viewer/core/lib/styles/index.css';
+import '@react-pdf-viewer/default-layout/lib/styles/index.css';
 
 export default function App() {
+  const defaultLayoutPluginInstance = defaultLayoutPlugin();
+
   const [books, setBooks] = useState<string[]>([]);
   const [selectedBook, setSelectedBook] = useState<string | null>(null);
   
@@ -99,6 +105,32 @@ export default function App() {
     setEndPage('');
     if (window.innerWidth < 768) {
       setIsSidebarOpen(false);
+    }
+  };
+
+  const [isGeneratingIndex, setIsGeneratingIndex] = useState(false);
+
+  const handleGenerateIndex = async () => {
+    if (!selectedBook) return;
+    setIsGeneratingIndex(true);
+    setMessages([]);
+    try {
+      const res = await fetch('/api/generate-index', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: selectedBook, modelId: selectedModel || 'meta/llama-3.1-70b-instruct' })
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert("Error generating index: " + data.error);
+      } else {
+        setMessages([{ role: 'assistant', content: `**AI Generated Index:**\n\n${data.indexContent}` }]);
+      }
+    } catch (error) {
+      console.error("Index generation error:", error);
+      alert("Failed to generate index.");
+    } finally {
+      setIsGeneratingIndex(false);
     }
   };
 
@@ -297,11 +329,14 @@ export default function App() {
         
         <div className="flex-1 overflow-hidden relative bg-gray-200/50">
           {selectedBook ? (
-            <iframe 
-              src={`/api/books/${selectedBook}`} 
-              className="w-full h-full border-none"
-              title="PDF Viewer"
-            />
+            <div className="h-full w-full">
+              <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js">
+                <Viewer
+                  fileUrl={`/api/books/${selectedBook}`}
+                  plugins={[defaultLayoutPluginInstance]}
+                />
+              </Worker>
+            </div>
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-4">
               <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center border border-gray-200 shadow-sm">
@@ -386,6 +421,17 @@ export default function App() {
                 </button>
               </div>
             )}
+            
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <button
+                onClick={handleGenerateIndex}
+                disabled={isGeneratingIndex}
+                className="w-full py-2 px-4 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              >
+                {isGeneratingIndex ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
+                Generate AI Index for entire book
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">

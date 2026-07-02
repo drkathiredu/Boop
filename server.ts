@@ -94,6 +94,56 @@ async function startServer() {
     }
   });
 
+  app.post("/api/generate-index", async (req, res) => {
+    try {
+      const { filename, modelId } = req.body;
+      if (!filename || !modelId) return res.status(400).json({ error: "Missing filename or modelId" });
+      
+      const filePath = path.join(booksDir, filename);
+      if (!fs.existsSync(filePath)) throw new Error("Book not found");
+      const buffer = fs.readFileSync(filePath);
+      
+      const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+      const newPdf = await PDFDocument.create();
+      
+      // Extract first 40 pages for index generation
+      const maxPages = Math.min(40, pdfDoc.getPageCount());
+      const pageIndices = Array.from({ length: maxPages }, (_, i) => i);
+      const copiedPages = await newPdf.copyPages(pdfDoc, pageIndices);
+      copiedPages.forEach((page) => newPdf.addPage(page));
+      
+      const newPdfBytes = await newPdf.save();
+      const data = await pdfParse(Buffer.from(newPdfBytes));
+      
+      const prompt = `Extract a clean, readable Table of Contents (Index) from the following text (which is the first few pages of a book). Only return the topics and their page numbers. Format it beautifully in Markdown. If you don't find a Table of Contents, just summarize the main headings you see in the first 40 pages.\n\nText:\n${data.text.substring(0, 15000)}`;
+      
+      const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.2,
+          max_tokens: 2000,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || "Failed to generate AI response");
+      }
+
+      const aiData = await response.json();
+      res.json({ indexContent: aiData.choices[0].message.content });
+    } catch (error: any) {
+      console.error("Index generation error:", error);
+      res.status(500).json({ error: "Failed to generate index", details: error.message });
+    }
+  });
+
   app.post("/api/extract-pages", async (req, res) => {
     try {
       const { filename, startPage, endPage } = req.body;
