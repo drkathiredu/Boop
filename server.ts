@@ -113,18 +113,10 @@ async function startServer() {
       copiedPages.forEach((page) => newPdf.addPage(page));
       
       const newPdfBytes = await newPdf.save();
-      const bufferToParse = Buffer.from(newPdfBytes);
+      const newPdfBuffer = Buffer.from(newPdfBytes);
 
-      const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-      const loadingTask = pdfjsLib.getDocument({data: new Uint8Array(bufferToParse)});
-      const parsedPdfDoc = await loadingTask.promise;
-      
-      let text = "";
-      for (let i = 1; i <= parsedPdfDoc.numPages; i++) {
-         const page = await parsedPdfDoc.getPage(i);
-         const textContent = await page.getTextContent();
-         text += textContent.items.map((item: any) => item.str).join(" ") + "\n";
-      }
+      const data = await pdfParse(newPdfBuffer);
+      let text = data.text;
       
       const prompt = `Extract a Table of Contents (Index) from the following text (which is the first few pages of a book). 
 Return ONLY a JSON array of objects, where each object has a 'title' (string), a 'startPage' (number), and an 'endPage' (number). If the end page is unknown, estimate it based on the next topic's start page. Do not include any markdown formatting around the JSON array, just the raw JSON array.
@@ -205,21 +197,12 @@ ${text.substring(0, 15000)}`;
       const newPdfBytes = await newPdf.save();
       const newPdfBuffer = Buffer.from(newPdfBytes);
       
-      console.log("Parsing pdf text using pdfjs-dist directly from buffer");
-      const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-      const loadingTask = pdfjsLib.getDocument({data: new Uint8Array(buffer)});
-      const pdfDocument = await loadingTask.promise;
-      
-      let text = "";
-      for (let i of pageIndices) {
-         const page = await pdfDocument.getPage(i + 1);
-         const textContent = await page.getTextContent();
-         text += textContent.items.map((item: any) => item.str).join(" ") + "\n";
-      }
+      console.log("Parsing pdf text using pdf-parse");
+      const data = await pdfParse(newPdfBuffer);
       console.log("Parse complete");
       const base64Pdf = newPdfBuffer.toString('base64');
       
-      res.json({ text, pdfBase64: base64Pdf });
+      res.json({ text: data.text, pdfBase64: base64Pdf });
     } catch (error: any) {
       console.error("Extraction error:", error);
       res.status(500).json({ error: "Failed to extract pages", details: error.message });

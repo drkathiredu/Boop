@@ -103,116 +103,15 @@ export default function App() {
     setMessages([]);
     setStartPage('');
     setEndPage('');
-    setIndexTopics([]);
     if (window.innerWidth < 768) {
       setIsSidebarOpen(false);
     }
   };
 
-  const [isGeneratingIndex, setIsGeneratingIndex] = useState(false);
-  const [indexTopics, setIndexTopics] = useState<{title: string, startPage: number, endPage: number}[]>([]);
-  const [hasNativeIndex, setHasNativeIndex] = useState(false);
-  const [isParsingIndex, setIsParsingIndex] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-
-  const handleDocumentLoad = async (e: any) => {
-    const doc = e.doc;
-    setIsParsingIndex(true);
-    setIndexTopics([]);
-    try {
-      const outline = await doc.getOutline();
-      if (outline && outline.length > 0) {
-        const topics: {title: string, startPage: number, endPage: number}[] = [];
-        
-        const traverse = async (items: any[]) => {
-          for (const item of items) {
-            let dest = item.dest;
-            if (typeof dest === 'string') {
-              dest = await doc.getDestination(dest);
-            }
-            if (dest) {
-              try {
-                // PDF.js getPageIndex can take a Ref object {num, gen} which is usually dest[0]
-                const ref = typeof dest[0] === 'object' ? dest[0] : dest;
-                const pageIndex = await doc.getPageIndex(ref);
-                if (pageIndex !== null && pageIndex !== undefined) {
-                   topics.push({ title: item.title, startPage: pageIndex + 1, endPage: 0 });
-                }
-              } catch (err) {
-                 console.error("Failed to get page index", err);
-              }
-            }
-            if (item.items && item.items.length > 0) {
-              await traverse(item.items);
-            }
-          }
-        };
-        
-        await traverse(outline);
-        
-        if (topics.length > 0) {
-          topics.sort((a, b) => a.startPage - b.startPage);
-          
-          for (let i = 0; i < topics.length; i++) {
-            if (i < topics.length - 1) {
-                let nextStart = topics[i+1].startPage;
-                topics[i].endPage = nextStart > topics[i].startPage ? nextStart - 1 : topics[i].startPage;
-            } else {
-                topics[i].endPage = doc.numPages;
-            }
-          }
-          
-          const uniqueTopics = topics.filter((t, index, self) => 
-            index === self.findIndex((t2) => (
-              t.startPage === t2.startPage && t.title === t2.title
-            ))
-          );
-          
-          setIndexTopics(uniqueTopics);
-          setHasNativeIndex(true);
-        } else {
-          setHasNativeIndex(false);
-        }
-      } else {
-        setHasNativeIndex(false);
-      }
-    } catch (err) {
-      console.error("Error parsing outline", err);
-    } finally {
-      setIsParsingIndex(false);
-    }
-  };
 
   const handlePageChange = (e: any) => {
     setCurrentPage(e.currentPage + 1);
-  };
-
-  const handleGenerateIndex = async () => {
-    if (!selectedBook) return;
-    setIsGeneratingIndex(true);
-    setIndexTopics([]);
-    try {
-      const res = await fetch('/api/generate-index', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: selectedBook, modelId: selectedModel || 'meta/llama-3.1-70b-instruct' })
-      });
-      const data = await res.json();
-      if (data.error) {
-        alert("Error generating index: " + data.error);
-      } else {
-        if (data.topics && data.topics.length > 0) {
-          setIndexTopics(data.topics);
-        } else {
-          setMessages([{ role: 'assistant', content: `**AI Generated Index (Raw):**\n\n${data.raw}` }]);
-        }
-      }
-    } catch (error) {
-      console.error("Index generation error:", error);
-      alert("Failed to generate index.");
-    } finally {
-      setIsGeneratingIndex(false);
-    }
   };
 
   const extractSpecificPages = async (start: string, end: string, autoDownload: boolean = false) => {
@@ -421,13 +320,30 @@ export default function App() {
         </div>
         
         <div className="flex-1 overflow-hidden relative bg-gray-200/50">
-          {selectedBook ? (
+          {extractedTopic && extractedTopic.pdfBase64 ? (
+            <div className="h-full w-full relative">
+              <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20 flex gap-3 shadow-[0_4px_24px_rgba(0,0,0,0.15)] rounded-xl p-1.5 bg-white/90 backdrop-blur-sm border border-gray-200">
+                 <button onClick={() => setExtractedTopic(null)} className="bg-white px-4 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm">
+                    Back to Full Book
+                 </button>
+                 <button onClick={handleDownloadExtract} className="bg-blue-600 px-4 py-2 rounded-lg text-sm font-medium text-white hover:bg-blue-700 flex items-center gap-2 transition-colors shadow-sm">
+                    <Download className="w-4 h-4" /> Download Split PDF
+                 </button>
+              </div>
+              <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js">
+                <Viewer
+                  fileUrl={`data:application/pdf;base64,${extractedTopic.pdfBase64}`}
+                  plugins={[defaultLayoutPluginInstance]}
+                  onPageChange={handlePageChange}
+                />
+              </Worker>
+            </div>
+          ) : selectedBook ? (
             <div className="h-full w-full">
               <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js">
                 <Viewer
                   fileUrl={`/api/books/${selectedBook}`}
                   plugins={[defaultLayoutPluginInstance]}
-                  onDocumentLoad={handleDocumentLoad}
                   onPageChange={handlePageChange}
                 />
               </Worker>
@@ -514,65 +430,6 @@ export default function App() {
               </button>
             </form>
             
-            {extractedTopic && (
-              <div className="mt-4 p-3 bg-emerald-50 border border-emerald-100 rounded-lg flex items-center justify-between">
-                <div className="text-xs text-emerald-800">
-                  <span className="font-semibold block mb-0.5">Extraction Ready</span>
-                  Pages {startPage} - {endPage} loaded for AI.
-                </div>
-                <button
-                  onClick={handleDownloadExtract}
-                  className="p-2 bg-white text-emerald-600 rounded-md shadow-sm border border-emerald-100 hover:bg-emerald-50 transition-colors"
-                  title="Download Extracted PDF"
-                >
-                  <Download className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-            
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              {isParsingIndex ? (
-                 <div className="w-full py-2 flex items-center justify-center gap-2 text-xs text-gray-500">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Parsing PDF outline...
-                 </div>
-              ) : !hasNativeIndex ? (
-                <button
-                  onClick={handleGenerateIndex}
-                  disabled={isGeneratingIndex}
-                  className="w-full py-2 px-4 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 mb-2"
-                >
-                  {isGeneratingIndex ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-                  Generate AI Index for entire book
-                </button>
-              ) : null}
-              
-              {indexTopics.length > 0 && (
-                <div className="mt-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
-                   <h4 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Click topic to load pages</h4>
-                   <div className="space-y-1">
-                      {indexTopics.map((topic, i) => (
-                         <button 
-                            key={i} 
-                            onClick={() => {
-                               const s = topic.startPage.toString();
-                               const e = topic.endPage ? topic.endPage.toString() : (topic.startPage + 10).toString();
-                               setStartPage(s);
-                               setEndPage(e);
-                               extractSpecificPages(s, e, true);
-                            }}
-                            className="w-full text-left py-2 px-3 hover:bg-white rounded-lg text-sm text-gray-700 flex justify-between items-center group border border-transparent hover:border-gray-200 transition-colors"
-                         >
-                            <span className="truncate pr-2 font-medium">{topic.title}</span>
-                            <span className="text-xs text-gray-400 group-hover:text-blue-500 whitespace-nowrap bg-gray-100 group-hover:bg-blue-50 px-1.5 py-0.5 rounded-md">
-                              p. {topic.startPage}{topic.endPage && topic.endPage > topic.startPage ? `-${topic.endPage}` : ''}
-                            </span>
-                         </button>
-                      ))}
-                   </div>
-                </div>
-              )}
-            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
