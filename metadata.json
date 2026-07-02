@@ -1,0 +1,6 @@
+{
+  "name": "NIM PDF Topic Reader",
+  "description": "Upload a PDF, split it into topics, and ask questions to NVIDIA NIM models.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
