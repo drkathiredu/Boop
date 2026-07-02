@@ -115,7 +115,11 @@ async function startServer() {
       const newPdfBytes = await newPdf.save();
       const data = await pdfParse(Buffer.from(newPdfBytes));
       
-      const prompt = `Extract a clean, readable Table of Contents (Index) from the following text (which is the first few pages of a book). Only return the topics and their page numbers. Format it beautifully in Markdown. If you don't find a Table of Contents, just summarize the main headings you see in the first 40 pages.\n\nText:\n${data.text.substring(0, 15000)}`;
+      const prompt = `Extract a Table of Contents (Index) from the following text (which is the first few pages of a book). 
+Return ONLY a JSON array of objects, where each object has a 'title' (string), a 'startPage' (number), and an 'endPage' (number). If the end page is unknown, estimate it based on the next topic's start page. Do not include any markdown formatting around the JSON array, just the raw JSON array.
+
+Text:
+${data.text.substring(0, 15000)}`;
       
       const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
         method: "POST",
@@ -126,7 +130,7 @@ async function startServer() {
         body: JSON.stringify({
           model: modelId,
           messages: [{ role: "user", content: prompt }],
-          temperature: 0.2,
+          temperature: 0.1,
           max_tokens: 2000,
         }),
       });
@@ -137,7 +141,16 @@ async function startServer() {
       }
 
       const aiData = await response.json();
-      res.json({ indexContent: aiData.choices[0].message.content });
+      let content = aiData.choices[0].message.content;
+      // Strip markdown code block if present
+      content = content.replace(/```json/gi, '').replace(/```/g, '').trim();
+      let topics = [];
+      try {
+        topics = JSON.parse(content);
+      } catch (e) {
+        console.error("JSON parse error:", e);
+      }
+      res.json({ topics, raw: content });
     } catch (error: any) {
       console.error("Index generation error:", error);
       res.status(500).json({ error: "Failed to generate index", details: error.message });

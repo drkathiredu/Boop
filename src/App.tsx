@@ -103,17 +103,19 @@ export default function App() {
     setMessages([]);
     setStartPage('');
     setEndPage('');
+    setIndexTopics([]);
     if (window.innerWidth < 768) {
       setIsSidebarOpen(false);
     }
   };
 
   const [isGeneratingIndex, setIsGeneratingIndex] = useState(false);
+  const [indexTopics, setIndexTopics] = useState<{title: string, startPage: number, endPage: number}[]>([]);
 
   const handleGenerateIndex = async () => {
     if (!selectedBook) return;
     setIsGeneratingIndex(true);
-    setMessages([]);
+    setIndexTopics([]);
     try {
       const res = await fetch('/api/generate-index', {
         method: 'POST',
@@ -124,7 +126,11 @@ export default function App() {
       if (data.error) {
         alert("Error generating index: " + data.error);
       } else {
-        setMessages([{ role: 'assistant', content: `**AI Generated Index:**\n\n${data.indexContent}` }]);
+        if (data.topics && data.topics.length > 0) {
+          setIndexTopics(data.topics);
+        } else {
+          setMessages([{ role: 'assistant', content: `**AI Generated Index (Raw):**\n\n${data.raw}` }]);
+        }
       }
     } catch (error) {
       console.error("Index generation error:", error);
@@ -134,10 +140,8 @@ export default function App() {
     }
   };
 
-  const handleExtractPages = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedBook || !startPage || !endPage) return;
-
+  const extractSpecificPages = async (start: string, end: string, autoDownload: boolean = false) => {
+    if (!selectedBook || !start || !end) return;
     setIsExtracting(true);
     setExtractedTopic(null);
     setMessages([]);
@@ -148,8 +152,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           filename: selectedBook,
-          startPage: startPage,
-          endPage: endPage
+          startPage: start,
+          endPage: end
         })
       });
       const data = await res.json();
@@ -158,11 +162,20 @@ export default function App() {
         alert("Error: " + data.error);
       } else {
         setExtractedTopic({ 
-          query: `Pages ${startPage}-${endPage}`, 
+          query: `Pages ${start}-${end}`, 
           content: data.text,
           pdfBase64: data.pdfBase64 
         });
-        setMessages([{ role: 'assistant', content: `I've read pages ${startPage} to ${endPage} from ${selectedBook}. Ask me anything about this section!` }]);
+        setMessages([{ role: 'assistant', content: `I've read pages ${start} to ${end} from ${selectedBook}. Ask me anything about this section!` }]);
+        
+        if (autoDownload && data.pdfBase64) {
+          const link = document.createElement('a');
+          link.href = `data:application/pdf;base64,${data.pdfBase64}`;
+          link.download = `${selectedBook}-extracted-${start}-${end}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
       }
     } catch (error) {
       console.error("Extraction error:", error);
@@ -170,6 +183,11 @@ export default function App() {
     } finally {
       setIsExtracting(false);
     }
+  };
+
+  const handleExtractPages = async (e: React.FormEvent) => {
+    e.preventDefault();
+    extractSpecificPages(startPage, endPage);
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -353,7 +371,7 @@ export default function App() {
 
       {/* AI Extract & Chat Sidebar */}
       {isAiSidebarOpen && (
-        <div className="w-full md:w-[420px] lg:w-[480px] bg-white border-l border-gray-200 flex flex-col h-full shrink-0 shadow-[-4px_0_24px_rgba(0,0,0,0.02)] absolute right-0 top-0 md:relative z-20">
+        <div className="w-full md:w-[420px] lg:w-[480px] bg-white border-l border-gray-200 flex flex-col h-full shrink-0 shadow-[-4px_0_24px_rgba(0,0,0,0.02)] absolute right-0 top-0 md:relative z-40">
           <div className="h-14 border-b border-gray-100 flex items-center px-4 justify-between bg-white shrink-0">
             <h2 className="font-medium text-gray-800 flex items-center gap-2">
               <Bot className="w-5 h-5 text-emerald-500" />
@@ -426,11 +444,37 @@ export default function App() {
               <button
                 onClick={handleGenerateIndex}
                 disabled={isGeneratingIndex}
-                className="w-full py-2 px-4 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2 px-4 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 mb-2"
               >
                 {isGeneratingIndex ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
                 Generate AI Index for entire book
               </button>
+              
+              {indexTopics.length > 0 && (
+                <div className="mt-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                   <h4 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Click topic to load pages</h4>
+                   <div className="space-y-1">
+                      {indexTopics.map((topic, i) => (
+                         <button 
+                            key={i} 
+                            onClick={() => {
+                               const s = topic.startPage.toString();
+                               const e = topic.endPage ? topic.endPage.toString() : (topic.startPage + 10).toString();
+                               setStartPage(s);
+                               setEndPage(e);
+                               extractSpecificPages(s, e, true);
+                            }}
+                            className="w-full text-left py-2 px-3 hover:bg-white rounded-lg text-sm text-gray-700 flex justify-between items-center group border border-transparent hover:border-gray-200 transition-colors"
+                         >
+                            <span className="truncate pr-2 font-medium">{topic.title}</span>
+                            <span className="text-xs text-gray-400 group-hover:text-blue-500 whitespace-nowrap bg-gray-100 group-hover:bg-blue-50 px-1.5 py-0.5 rounded-md">
+                              p. {topic.startPage}{topic.endPage && topic.endPage > topic.startPage ? `-${topic.endPage}` : ''}
+                            </span>
+                         </button>
+                      ))}
+                   </div>
+                </div>
+              )}
             </div>
           </div>
 
