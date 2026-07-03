@@ -175,13 +175,23 @@ ${text.substring(0, 15000)}`;
 
       const aiData = await response.json();
       let content = aiData.choices[0].message.content;
-      // Strip markdown code block if present
-      content = content.replace(/```json/gi, '').replace(/```/g, '').trim();
       let topics = [];
-      try {
-        topics = JSON.parse(content);
-      } catch (e) {
-        console.error("JSON parse error:", e);
+      const regex = /\{\s*"title"\s*:\s*"[^"]+"\s*,\s*"startPage"\s*:\s*\d+\s*(?:,\s*"endPage"\s*:\s*\d+\s*)?\}/g;
+      const matches = content.match(regex);
+      if (matches) {
+         try {
+            topics = matches.map((m: string) => JSON.parse(m));
+         } catch(e) {
+            console.error("Regex JSON parse error:", e);
+         }
+      }
+      if (topics.length === 0) {
+         try {
+            content = content.replace(/```json/gi, '').replace(/```/g, '').trim();
+            topics = JSON.parse(content);
+         } catch (e) {
+            console.error("JSON parse error fallback:", e);
+         }
       }
       res.json({ topics, raw: content });
     } catch (error: any) {

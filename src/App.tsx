@@ -1,15 +1,68 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, createContext, useContext } from 'react';
 import { Upload, FileText, Send, BookOpen, MessageSquare, Loader2, Bot, Info, Settings2, RefreshCw, Library, PanelRightClose, PanelRightOpen, Download } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Message, Model } from './types';
 import { Viewer, Worker } from '@react-pdf-viewer/core';
-import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
+import { defaultLayoutPlugin, BookmarkIcon } from '@react-pdf-viewer/default-layout';
 import '@react-pdf-viewer/core/lib/styles/index.css';
 import '@react-pdf-viewer/default-layout/lib/styles/index.css';
 
-export default function App() {
-  const defaultLayoutPluginInstance = defaultLayoutPlugin();
+interface Topic {
+  title: string;
+  startPage: number;
+  endPage: number;
+}
 
+const BookmarksContext = createContext<{
+  aiIndex: Topic[];
+  setStartPage: (p: string) => void;
+  setEndPage: (p: string) => void;
+  extractSpecificPages: (start: string, end: string, autoDownload: boolean) => void;
+}>({
+  aiIndex: [],
+  setStartPage: () => {},
+  setEndPage: () => {},
+  extractSpecificPages: () => {}
+});
+
+const CustomBookmarkTab = ({ defaultContent }: { defaultContent: React.ReactNode }) => {
+  const { aiIndex, setStartPage, setEndPage, extractSpecificPages } = useContext(BookmarksContext);
+  
+  return (
+    <div className="w-full h-full flex flex-col">
+      {aiIndex && aiIndex.length > 0 && (
+        <div className="p-2 shrink-0 border-b border-gray-200">
+          <div className="mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider px-2 pt-1">AI Generated Bookmarks</div>
+          <div className="space-y-0.5 max-h-48 overflow-y-auto custom-scrollbar">
+            {aiIndex.map((topic, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  const s = topic.startPage.toString();
+                  const e = topic.endPage ? topic.endPage.toString() : (topic.startPage + 10).toString();
+                  setStartPage(s);
+                  setEndPage(e);
+                  extractSpecificPages(s, e, false);
+                }}
+                className="w-full text-left py-2 px-2 hover:bg-blue-50 rounded-md text-xs text-gray-700 flex justify-between items-center group transition-colors"
+              >
+                <span className="truncate pr-2 font-medium">{topic.title}</span>
+                <span className="text-[10px] text-gray-400 group-hover:text-blue-500 whitespace-nowrap bg-gray-50 group-hover:bg-white px-1.5 py-0.5 rounded border border-transparent group-hover:border-blue-100">
+                  p. {topic.startPage}{topic.endPage && topic.endPage > topic.startPage ? `-${topic.endPage}` : ''}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="flex-1 overflow-hidden">
+        {defaultContent}
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
   const [books, setBooks] = useState<string[]>([]);
   const [selectedBook, setSelectedBook] = useState<string | null>(null);
   
@@ -29,6 +82,69 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [aiIndex, setAiIndex] = useState<{title: string, startPage: number, endPage: number}[]>([]);
+  const [isGeneratingIndex, setIsGeneratingIndex] = useState(false);
+  const [tocStartPage, setTocStartPage] = useState('');
+  const [tocEndPage, setTocEndPage] = useState('');
+
+  const extractSpecificPages = async (start: string, end: string, autoDownload: boolean = false) => {
+    if (!selectedBook || !start || !end) return;
+    setIsExtracting(true);
+    setExtractedTopic(null);
+    setMessages([]);
+
+    try {
+      const res = await fetch('/api/extract-pages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: selectedBook,
+          startPage: start,
+          endPage: end
+        })
+      });
+      const data = await res.json();
+      
+      if (data.error) {
+        alert("Error: " + data.error + (data.details ? " | " + data.details : ""));
+      } else {
+        setExtractedTopic({ 
+          query: `Pages ${start}-${end}`, 
+          content: data.text,
+          pdfBase64: data.pdfBase64 
+        });
+        setMessages([{ role: 'assistant', content: `I've read pages ${start} to ${end} from ${selectedBook}. Ask me anything about this section!` }]);
+        
+        if (autoDownload && data.pdfBase64) {
+          const link = document.createElement('a');
+          link.href = `data:application/pdf;base64,${data.pdfBase64}`;
+          link.download = `${selectedBook}-extracted-${start}-${end}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+      }
+    } catch (error) {
+      console.error("Extraction error:", error);
+      alert("Failed to extract pages.");
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  const defaultLayoutPluginInstance = defaultLayoutPlugin({
+    sidebarTabs: (defaultTabs) => [
+      defaultTabs[0],
+      {
+        content: <CustomBookmarkTab defaultContent={defaultTabs[1].content} />,
+        icon: <BookmarkIcon />,
+        title: 'Bookmarks',
+      },
+      defaultTabs[2],
+    ]
+  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -111,12 +227,6 @@ export default function App() {
     }
   };
 
-  const [currentPage, setCurrentPage] = useState(1);
-  const [aiIndex, setAiIndex] = useState<{title: string, startPage: number, endPage: number}[]>([]);
-  const [isGeneratingIndex, setIsGeneratingIndex] = useState(false);
-  const [tocStartPage, setTocStartPage] = useState('');
-  const [tocEndPage, setTocEndPage] = useState('');
-
   const handlePageChange = (e: any) => {
     setCurrentPage(e.currentPage + 1);
   };
@@ -146,51 +256,6 @@ export default function App() {
       alert("Failed to generate index.");
     } finally {
       setIsGeneratingIndex(false);
-    }
-  };
-
-  const extractSpecificPages = async (start: string, end: string, autoDownload: boolean = false) => {
-    if (!selectedBook || !start || !end) return;
-    setIsExtracting(true);
-    setExtractedTopic(null);
-    setMessages([]);
-
-    try {
-      const res = await fetch('/api/extract-pages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: selectedBook,
-          startPage: start,
-          endPage: end
-        })
-      });
-      const data = await res.json();
-      
-      if (data.error) {
-        alert("Error: " + data.error + (data.details ? " | " + data.details : ""));
-      } else {
-        setExtractedTopic({ 
-          query: `Pages ${start}-${end}`, 
-          content: data.text,
-          pdfBase64: data.pdfBase64 
-        });
-        setMessages([{ role: 'assistant', content: `I've read pages ${start} to ${end} from ${selectedBook}. Ask me anything about this section!` }]);
-        
-        if (autoDownload && data.pdfBase64) {
-          const link = document.createElement('a');
-          link.href = `data:application/pdf;base64,${data.pdfBase64}`;
-          link.download = `${selectedBook}-extracted-${start}-${end}.pdf`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        }
-      }
-    } catch (error) {
-      console.error("Extraction error:", error);
-      alert("Failed to extract pages.");
-    } finally {
-      setIsExtracting(false);
     }
   };
 
@@ -248,6 +313,7 @@ export default function App() {
   };
 
   return (
+    <BookmarksContext.Provider value={{ aiIndex, setStartPage, setEndPage, extractSpecificPages }}>
     <div className="flex h-screen w-full bg-[#FAFAFA] font-sans overflow-hidden text-gray-900">
       
       {/* Sidebar: Library & Upload */}
@@ -481,32 +547,6 @@ export default function App() {
                  {isGeneratingIndex ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BookOpen className="w-3.5 h-3.5" />}
                  Generate Index Bookmarks
               </button>
-              
-              {aiIndex.length > 0 && (
-                <div className="mt-4 max-h-48 overflow-y-auto pr-2 custom-scrollbar bg-white rounded-lg border border-gray-100 shadow-inner p-1">
-                   <h4 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2 pt-2">Generated Bookmarks</h4>
-                   <div className="space-y-0.5">
-                      {aiIndex.map((topic, i) => (
-                         <button 
-                            key={i} 
-                            onClick={() => {
-                               const s = topic.startPage.toString();
-                               const e = topic.endPage ? topic.endPage.toString() : (topic.startPage + 10).toString();
-                               setStartPage(s);
-                               setEndPage(e);
-                               extractSpecificPages(s, e, false);
-                            }}
-                            className="w-full text-left py-2 px-3 hover:bg-blue-50 rounded-md text-xs text-gray-700 flex justify-between items-center group transition-colors"
-                         >
-                            <span className="truncate pr-2 font-medium">{topic.title}</span>
-                            <span className="text-[10px] text-gray-400 group-hover:text-blue-500 whitespace-nowrap bg-gray-50 group-hover:bg-white px-1.5 py-0.5 rounded border border-transparent group-hover:border-blue-100">
-                              p. {topic.startPage}{topic.endPage && topic.endPage > topic.startPage ? `-${topic.endPage}` : ''}
-                            </span>
-                         </button>
-                      ))}
-                   </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -601,5 +641,6 @@ export default function App() {
       )}
 
     </div>
+    </BookmarksContext.Provider>
   );
 }
