@@ -117,8 +117,8 @@ async function startServer() {
 
   app.post("/api/generate-index", async (req, res) => {
     try {
-      const { filename, modelId } = req.body;
-      if (!filename || !modelId) return res.status(400).json({ error: "Missing filename or modelId" });
+      const { filename, modelId, startPage, endPage } = req.body;
+      if (!filename || !modelId || !startPage || !endPage) return res.status(400).json({ error: "Missing filename, modelId, startPage, or endPage" });
       
       const filePath = path.join(booksDir, filename);
       if (!fs.existsSync(filePath)) throw new Error("Book not found");
@@ -127,9 +127,18 @@ async function startServer() {
       const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
       const newPdf = await PDFDocument.create();
       
-      // Extract first 40 pages for index generation
-      const maxPages = Math.min(40, pdfDoc.getPageCount());
-      const pageIndices = Array.from({ length: maxPages }, (_, i) => i);
+      const start = parseInt(startPage);
+      const end = parseInt(endPage);
+
+      const pageIndices = [];
+      for (let i = start - 1; i <= end - 1; i++) {
+        if (i >= 0 && i < pdfDoc.getPageCount()) {
+           pageIndices.push(i);
+        }
+      }
+
+      if (pageIndices.length === 0) throw new Error("Invalid page range");
+
       const copiedPages = await newPdf.copyPages(pdfDoc, pageIndices);
       copiedPages.forEach((page) => newPdf.addPage(page));
       
@@ -139,7 +148,7 @@ async function startServer() {
       const data = await pdfParse(newPdfBuffer);
       let text = data.text;
       
-      const prompt = `Extract a Table of Contents (Index) from the following text (which is the first few pages of a book). 
+      const prompt = `Extract a Table of Contents (Index) from the following text (which is the table of contents pages of a book). 
 Return ONLY a JSON array of objects, where each object has a 'title' (string), a 'startPage' (number), and an 'endPage' (number). If the end page is unknown, estimate it based on the next topic's start page. Do not include any markdown formatting around the JSON array, just the raw JSON array.
 
 Text:

@@ -103,15 +103,50 @@ export default function App() {
     setMessages([]);
     setStartPage('');
     setEndPage('');
+    setAiIndex([]);
+    setTocStartPage('');
+    setTocEndPage('');
     if (window.innerWidth < 768) {
       setIsSidebarOpen(false);
     }
   };
 
   const [currentPage, setCurrentPage] = useState(1);
+  const [aiIndex, setAiIndex] = useState<{title: string, startPage: number, endPage: number}[]>([]);
+  const [isGeneratingIndex, setIsGeneratingIndex] = useState(false);
+  const [tocStartPage, setTocStartPage] = useState('');
+  const [tocEndPage, setTocEndPage] = useState('');
 
   const handlePageChange = (e: any) => {
     setCurrentPage(e.currentPage + 1);
+  };
+
+  const handleGenerateIndex = async () => {
+    if (!selectedBook || !tocStartPage || !tocEndPage) return;
+    setIsGeneratingIndex(true);
+    setAiIndex([]);
+    try {
+      const res = await fetch('/api/generate-index', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: selectedBook, startPage: tocStartPage, endPage: tocEndPage, modelId: selectedModel || 'meta/llama-3.1-70b-instruct' })
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert("Error generating index: " + data.error);
+      } else {
+        if (data.topics && data.topics.length > 0) {
+          setAiIndex(data.topics);
+        } else {
+          setMessages([{ role: 'assistant', content: `**AI Generated Index (Raw):**\n\n${data.raw}` }]);
+        }
+      }
+    } catch (error) {
+      console.error("Index generation error:", error);
+      alert("Failed to generate index.");
+    } finally {
+      setIsGeneratingIndex(false);
+    }
   };
 
   const extractSpecificPages = async (start: string, end: string, autoDownload: boolean = false) => {
@@ -430,6 +465,49 @@ export default function App() {
               </button>
             </form>
             
+            <div className="mt-5 pt-5 border-t border-gray-200">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">No Index? Generate Bookmarks via AI</h3>
+              </div>
+              <div className="flex gap-2 mb-3">
+                 <input type="number" placeholder="TOC Start Pg" className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" value={tocStartPage} onChange={e => setTocStartPage(e.target.value)} />
+                 <input type="number" placeholder="TOC End Pg" className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" value={tocEndPage} onChange={e => setTocEndPage(e.target.value)} />
+              </div>
+              <button 
+                 onClick={handleGenerateIndex} 
+                 disabled={isGeneratingIndex || !tocStartPage || !tocEndPage}
+                 className="w-full py-2 px-3 bg-white border border-gray-200 shadow-sm text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 flex justify-center items-center gap-2"
+              >
+                 {isGeneratingIndex ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BookOpen className="w-3.5 h-3.5" />}
+                 Generate Index Bookmarks
+              </button>
+              
+              {aiIndex.length > 0 && (
+                <div className="mt-4 max-h-48 overflow-y-auto pr-2 custom-scrollbar bg-white rounded-lg border border-gray-100 shadow-inner p-1">
+                   <h4 className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2 pt-2">Generated Bookmarks</h4>
+                   <div className="space-y-0.5">
+                      {aiIndex.map((topic, i) => (
+                         <button 
+                            key={i} 
+                            onClick={() => {
+                               const s = topic.startPage.toString();
+                               const e = topic.endPage ? topic.endPage.toString() : (topic.startPage + 10).toString();
+                               setStartPage(s);
+                               setEndPage(e);
+                               extractSpecificPages(s, e, false);
+                            }}
+                            className="w-full text-left py-2 px-3 hover:bg-blue-50 rounded-md text-xs text-gray-700 flex justify-between items-center group transition-colors"
+                         >
+                            <span className="truncate pr-2 font-medium">{topic.title}</span>
+                            <span className="text-[10px] text-gray-400 group-hover:text-blue-500 whitespace-nowrap bg-gray-50 group-hover:bg-white px-1.5 py-0.5 rounded border border-transparent group-hover:border-blue-100">
+                              p. {topic.startPage}{topic.endPage && topic.endPage > topic.startPage ? `-${topic.endPage}` : ''}
+                            </span>
+                         </button>
+                      ))}
+                   </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
